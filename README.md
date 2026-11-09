@@ -27,61 +27,75 @@ Instead of heavy bitmap assets or complex 3D engine overhead, the rendering pipe
 
 ---
 
+## Core Engine vs Platform Renderer (Decoupled Architecture)
+
+To keep the procedural core completely independent of Android and Jetpack Compose (allowing smooth porting to other modules or engines), the architecture is strictly split into two layers:
+
+```kotlin
+/**
+ * Represents the normalized geometry of the abyss
+ * at an absolute depth. (Pure Kotlin, no Android dependencies)
+ */
+data class AbyssGeometry(
+    val depth: Double,
+    val leftX: Float,
+    val rightX: Float
+)
+```
+
+- **Abyss Core (Pure Kotlin):** Seed, Hash, Noise, fBm, Geometry, Sampling. (Platform independent).
+- **Abyss Renderer (Android):** Compose, Canvas, Path, AGSL, Viewport Adapter. (Platform dependent).
+
+---
+
 ## Deep Dive: The Procedural Engine
 
 ### 1. Deterministic Multi-Octave Noise (fBm)
 
 The environment geometry is derived from pure, state-less mathematical functions. No coordinate lists or terrain layouts are saved in memory or disk.
 
-* **Deterministic Hash:** A pure pseudo-random hashing function without mutable state:
+- **Deterministic Hash:** A pure pseudo-random hashing function without mutable state:
   $$\text{hash}(\text{seed}, \text{index}) \rightarrow [0.0, 1.0]$$
   
-* **1D Value Noise:** Smoothly interpolates between integer control points using cosine or cubic Hermite curves.
+- **1D Value Noise:** Smoothly interpolates between integer control points using cosine or cubic Hermite curves.
   
-* **Fractional Brownian Motion (fBm):** Combines multiple octaves of noise at varying amplitudes and frequencies:
+- **Fractional Brownian Motion (fBm):** Combines multiple octaves of noise at varying amplitudes and frequencies:
 
   $$N(y) = \sum_{i=0}^{n-1} A_i \cdot N_i(f_i \cdot y)$$
-
-
 
 ### 2. Geological Model & Boundary Computation
 
 The abyss topology is calculated per absolute depth coordinate ($y$) using independent noise streams:
 
-* **Centerline Drift:**
-
-   $C(y) = 0.5 + N_c(y)$ (determines the macro horizontal curvature of the trench).
-
-  
-* **Trench Width:**
-
-  $W(y) = W_{\text{base}} + N_w(y)$ (clamped within safe thresholds to prevent path closures).
-
-  
-* **Asymmetric Walls:**
+- **Centerline Drift:** $C(y) = 0.5 + N_c(y)$ (determines the macro horizontal curvature of the trench).
+- **Trench Width:** $W(y) = W_{\text{base}} + N_w(y)$ (clamped within safe thresholds to prevent path closures).
+- **Asymmetric Walls & Safety Constraint:** 
   
   $$L(y) = C(y) - \frac{W(y)}{2} + N_l(y)$$
+  
   $$R(y) = C(y) + \frac{W(y)}{2} + N_r(y)$$
 
+  *Constraint:* The asymmetrical offsets must strictly guarantee a minimum passage width to avoid wall intersections: 
+  $$\text{Right}(y) - \text{Left}(y) \geq W_{\text{min}}$$
 
 ### 3. Sampling, Normalization & Viewport Independence
 
-* **Resolution-Independent Core:** The core engine outputs normalized coordinates ($[0.0, 1.0]$).
-* **Viewport Adapter:** Converts normalized values into pixel coordinates dynamically based on screen width/height without altering the underlying geometry across different device aspect ratios ($720\times1600$, $1080\times2420$, $1440\times3200$).
-* **Sampling Step:** Each block samples absolute depth coordinates at a fixed step (e.g., $5\text{dp}$ interval) to build smooth closed `Path` objects.
-
+- **Resolution-Independent Core:** The core engine outputs normalized coordinates ($[0.0, 1.0]$).
+- **Viewport Adapter & Sampling Distinction:** 
+  - *Geometry Sampling:* Pure math evaluation in the geological coordinate space.
+  - *Render Sampling:* Density of points required for display resolution (e.g., pixel/dp intervals belong strictly to the renderer, not the core generator).
+- **Viewport Policy:** Preserves geological proportions across different device aspect ratios ($720\times1600$, $1080\times2420$, $1440\times3200$), allowing lateral margins to adapt dynamically.
 
 ### 4. Layout Node Virtualization (`LazyColumn`)
 
-* As the user scrolls, `LazyColumn` recycles node containers (`FossilBlock`).
-* Each item fetches its absolute start depth ($y_{\text{start}} = \text{blockIndex} \times \text{blockHeight}$) and queries `AbyssGenerator` on the fly.
-* **Memory Footprint:** $\approx 0\text{ MB}$ memory churn for terrain data regardless of trench depth (even down to $-100,000\text{m}$).
-
+- As the user scrolls, `LazyColumn` recycles node containers (`FossilBlock`).
+- Each item fetches its absolute start depth ($y_{\text{start}} = \text{blockIndex} \times \text{blockHeight}$) and queries `AbyssGenerator` on the fly.
+- **Bounded Memory Footprint:** Geometry is generated on demand for visible chunks. Memory consumption remains independent of total trench depth, subject to active composition and rendering cache size.
 
 ### 5. Local Brush & Global AGSL Post-Processing
 
-* **Local Wall Shader:** Fills vector paths with a custom AGSL `ShaderBrush` generating cross-hatching and dot dithering on the GPU.
-* **Global Post-Processing:** Appended to the root container via `Modifier.graphicsLayer` to perform 4-tone palette quantization, Bayer matrix dithering, CRT scanlines, and subtle lens curvature.
+- **Local Wall Shader:** Fills vector paths with a custom AGSL `ShaderBrush` generating cross-hatching and dot dithering on the GPU.
+- **Global Post-Processing:** Appended to the root container via `Modifier.graphicsLayer` to perform 4-tone palette quantization, Bayer matrix dithering, CRT scanlines, and subtle lens curvature.
 
 ---
 
@@ -94,7 +108,7 @@ The abyss topology is calculated per absolute depth coordinate ($y$) using indep
 - [ ] Validate seed consistency across independent runs
 
 ### Phase 2: Geological Model (`AbyssGenerator`)
-- [ ] Calculate centerline $C(y)$, width $W(y)$, and asymmetric offsets $L(y), R(y)$
+- [ ] Calculate centerline $C(y)$, width $W(y)$, and asymmetric offsets $L(y), R(y)$ ensuring $W_{\text{min}}$ enforcement
 - [ ] Ensure non-intersecting walls and continuous smooth curves
 
 ### Phase 3: Unit Block Canvas (`FossilBlock`)
@@ -122,20 +136,20 @@ The abyss topology is calculated per absolute depth coordinate ($y$) using indep
 - [ ] Same Seed + Same Depth = Identical Coordinates (100% deterministic)
 - [ ] Unique Seeds = Unique Topologies
 - [ ] No visible periodicity or repetitive patterns
-- [ ] Zero wall intersections / zero unpassable bottlenecks
+- [ ] Zero wall intersections / zero unpassable bottlenecks (enforced by $W_{\text{min}}$)
 - [ ] Perfect seamless alignment at segment boundaries
 - [ ] Viewport resolution invariant geometry
-- [ ] Direct $O(1)$ jump access to any depth depth without precalculating prior chunks
-- [ ] 60 FPS / 120 FPS smooth scrolling with zero GC allocations in layout loop
+- [ ] Random-access geometry sampling: Any absolute depth can be evaluated independently without sequentially generating previous depths. Sampling cost is bounded by the number of noise octaves ($O(1)$ constant cost per sample).
+- [ ] Fluid scrolling performance with optimized render-path allocation strategies.
 
 ---
 
 ## Tech Stack
 
-* **Language:** Kotlin
-* **UI Framework:** Jetpack Compose (BOM 2024+)
-* **Graphics Language:** AGSL (Android Graphics Shading Language — API 33+)
-* **Vector Engine:** Native Android `Canvas`, `Path`, & `Paint`
+- **Language:** Kotlin (Pure Kotlin for Core, Android/Compose for Renderer)
+- **UI Framework:** Jetpack Compose (BOM 2024+)
+- **Graphics Language:** AGSL (Android Graphics Shading Language — API 33+)
+- **Vector Engine:** Native Android `Canvas`, `Path`, & `Paint`
 
 ## License
 
