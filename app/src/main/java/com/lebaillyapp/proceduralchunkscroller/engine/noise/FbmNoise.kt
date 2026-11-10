@@ -1,8 +1,6 @@
 
 package com.lebaillyapp.proceduralchunkscroller.engine.noise
 
-import kotlin.math.pow
-
 /**
  * # Fractional Brownian Motion (fBm) generator.
  *
@@ -21,7 +19,6 @@ object FbmNoise {
      * ### Evaluates Fractional Brownian Motion at a continuous spatial position.
      *
      * Each octave samples the supplied noise provider using:
-     *
      * - An independently offset seed.
      * - A progressively scaled frequency.
      * - A progressively scaled amplitude.
@@ -100,18 +97,21 @@ object FbmNoise {
                 "Accumulated noise exceeds the supported numeric range."
             }
 
-            // No need to calculate unused parameters after the last octave.
-            if (i < octaves - 1) {
-                amplitude *= persistence
-                frequency *= lacunarity
+            // No further octave contributes when its amplitude becomes zero.
+            if (i == octaves - 1) break
 
-                require(frequency.isFinite() && frequency > 0.0) {
-                    "Octave frequency exceeds the supported numeric range."
-                }
+            amplitude *= persistence
 
-                require(amplitude.isFinite()) {
-                    "Octave amplitude exceeds the supported numeric range."
-                }
+            if (amplitude == 0.0) break
+
+            require(amplitude.isFinite()) {
+                "Octave amplitude exceeds the supported numeric range."
+            }
+
+            frequency *= lacunarity
+
+            require(frequency.isFinite() && frequency > 0.0) {
+                "Octave frequency exceeds the supported numeric range."
             }
         }
 
