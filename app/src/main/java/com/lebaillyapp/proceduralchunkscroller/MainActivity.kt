@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.lebaillyapp.proceduralchunkscroller.test.ProceduralTestScreen
+import com.lebaillyapp.proceduralchunkscroller.test.ScrollerTestScreen
 import com.lebaillyapp.proceduralchunkscroller.ui.theme.ProceduralChunkScrollerTheme
 
 class MainActivity : ComponentActivity() {
@@ -21,7 +22,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             ProceduralChunkScrollerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    ProceduralTestScreen(modifier =  Modifier.padding(innerPadding))
+
+
+                //    ProceduralTestScreen(modifier =  Modifier.padding(innerPadding))
+
+                    ScrollerTestScreen(modifier =  Modifier.padding(innerPadding))
+
+
                 }
             }
         }
