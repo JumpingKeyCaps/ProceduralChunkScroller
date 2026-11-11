@@ -344,7 +344,7 @@ private fun SettingsPanel(
         modifier = Modifier
             .fillMaxHeight()
             .width(320.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.56f),
         shadowElevation = 12.dp
     ) {
         Column(
