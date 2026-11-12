@@ -1,4 +1,3 @@
-
 package com.lebaillyapp.proceduralchunkscroller.test
 
 import androidx.compose.animation.AnimatedVisibility
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -36,7 +34,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -46,33 +43,20 @@ import com.lebaillyapp.proceduralchunkscroller.engine.config.GeneratorConfig
 import com.lebaillyapp.proceduralchunkscroller.engine.geometry.GeometrySample
 import com.lebaillyapp.proceduralchunkscroller.engine.geometry.SpatialGenerator
 import kotlin.math.ceil
+import kotlin.math.max
 import kotlin.random.Random
 
 private const val DEFAULT_CHUNK_HEIGHT = 250
 private const val DEFAULT_SAMPLE_STEP = 1.0
 
-private const val DEFAULT_BASE_WIDTH = 95.0
+private const val DEFAULT_BASE_WIDTH = 120.0
 private const val DEFAULT_MIN_WIDTH = 16.0
 
-private const val DEFAULT_CENTERLINE_AMPLITUDE = 35.6
-private const val DEFAULT_CENTERLINE_FREQUENCY = 0.0021
-
-private const val DEFAULT_WIDTH_AMPLITUDE = 40.9
-private const val DEFAULT_WIDTH_FREQUENCY = 0.0010
-
-private const val DEFAULT_ASYMMETRY_AMPLITUDE = 27.3
-private const val DEFAULT_ASYMMETRY_FREQUENCY = 0.0040
-
+private const val DEFAULT_WALL_AMPLITUDE = 45.0
+private const val DEFAULT_WALL_FREQUENCY = 0.004
 private const val DEFAULT_OCTAVES = 3
-
-private const val DEFAULT_CENTERLINE_PERSISTENCE = 0.30
-private const val DEFAULT_CENTERLINE_LACUNARITY = 1.30
-
-private const val DEFAULT_WIDTH_PERSISTENCE = 0.0
-private const val DEFAULT_WIDTH_LACUNARITY = 1.60
-
-private const val DEFAULT_ASYMMETRY_PERSISTENCE = 0.60
-private const val DEFAULT_ASYMMETRY_LACUNARITY = 1.20
+private const val DEFAULT_PERSISTENCE = 0.50
+private const val DEFAULT_LACUNARITY = 1.80
 
 private const val MIN_DEPTH = 250
 private const val MAX_DEPTH = 20_000
@@ -86,36 +70,25 @@ private fun createDefaultConfig(seed: Long): GeneratorConfig {
         seed = seed,
         baseWidth = DEFAULT_BASE_WIDTH,
         minWidth = DEFAULT_MIN_WIDTH,
-        centerline = GeneratorConfig.SignalConfig(
-            amplitude = DEFAULT_CENTERLINE_AMPLITUDE,
-            frequency = DEFAULT_CENTERLINE_FREQUENCY,
+        leftWall = GeneratorConfig.SignalConfig(
+            amplitude = DEFAULT_WALL_AMPLITUDE,
+            frequency = DEFAULT_WALL_FREQUENCY,
             octaves = DEFAULT_OCTAVES,
-            persistence = DEFAULT_CENTERLINE_PERSISTENCE,
-            lacunarity = DEFAULT_CENTERLINE_LACUNARITY
+            persistence = DEFAULT_PERSISTENCE,
+            lacunarity = DEFAULT_LACUNARITY
         ),
-        width = GeneratorConfig.SignalConfig(
-            amplitude = DEFAULT_WIDTH_AMPLITUDE,
-            frequency = DEFAULT_WIDTH_FREQUENCY,
+        rightWall = GeneratorConfig.SignalConfig(
+            amplitude = DEFAULT_WALL_AMPLITUDE,
+            frequency = DEFAULT_WALL_FREQUENCY,
             octaves = DEFAULT_OCTAVES,
-            persistence = DEFAULT_WIDTH_PERSISTENCE,
-            lacunarity = DEFAULT_WIDTH_LACUNARITY
-        ),
-        asymmetry = GeneratorConfig.SignalConfig(
-            amplitude = DEFAULT_ASYMMETRY_AMPLITUDE,
-            frequency = DEFAULT_ASYMMETRY_FREQUENCY,
-            octaves = DEFAULT_OCTAVES,
-            persistence = DEFAULT_ASYMMETRY_PERSISTENCE,
-            lacunarity = DEFAULT_ASYMMETRY_LACUNARITY
+            persistence = DEFAULT_PERSISTENCE,
+            lacunarity = DEFAULT_LACUNARITY
         )
     )
 }
 
 /**
  * Displays the procedural shaft over an adjustable absolute depth range.
- *
- * The generator profile can be modified in real time through a lateral
- * settings panel. The number of chunks is derived from the maximum depth.
- * Each chunk is sampled using absolute depth coordinates.
  */
 @Composable
 fun ScrollerTestScreen(
@@ -283,9 +256,6 @@ fun ScrollerTestScreen(
 
 /**
  * Generates all samples belonging to one chunk.
- *
- * Both chunk boundaries are included. The final boundary is explicitly
- * sampled when the sample step does not divide the chunk height exactly.
  */
 private fun generateChunkSamples(
     generator: SpatialGenerator,
@@ -308,23 +278,18 @@ private fun generateChunkSamples(
 }
 
 /**
- * Calculates a shared horizontal viewport extent for all chunks.
+ * Calculates a shared horizontal viewport extent proportional to the corridor geometry.
+ * Prevents artificial zoom compression when increasing baseWidth.
  */
 private fun calculateViewportHalfExtent(
     config: GeneratorConfig
 ): Double {
-    return (
-            config.baseWidth +
-                    config.centerline.amplitude +
-                    config.width.amplitude +
-                    config.asymmetry.amplitude
-            ).coerceAtLeast(1.0)
+    val maxWallAmplitude = max(config.leftWall.amplitude, config.rightWall.amplitude)
+    return ((config.baseWidth * 0.5) + maxWallAmplitude).coerceAtLeast(1.0)
 }
 
 /**
  * Displays the lateral settings panel.
- *
- * All configuration changes are immediately propagated to the generator.
  */
 @Composable
 private fun SettingsPanel(
@@ -344,7 +309,7 @@ private fun SettingsPanel(
         modifier = Modifier
             .fillMaxHeight()
             .width(320.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.56f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
         shadowElevation = 12.dp
     ) {
         Column(
@@ -393,13 +358,8 @@ private fun SettingsPanel(
                 valueRange = MIN_DEPTH.toFloat()..MAX_DEPTH.toFloat(),
                 steps = ((MAX_DEPTH - MIN_DEPTH) / DEPTH_STEP) - 1,
                 onValueChange = {
-                    val snapped = (
-                            it / DEPTH_STEP
-                            ).toInt() * DEPTH_STEP
-
-                    onMaxDepthChange(
-                        snapped.coerceIn(MIN_DEPTH, MAX_DEPTH)
-                    )
+                    val snapped = (it / DEPTH_STEP).toInt() * DEPTH_STEP
+                    onMaxDepthChange(snapped.coerceIn(MIN_DEPTH, MAX_DEPTH))
                 }
             )
 
@@ -410,9 +370,7 @@ private fun SettingsPanel(
                 valueRange = 50f..1_000f,
                 steps = 18,
                 onValueChange = {
-                    onChunkHeightChange(
-                        (it / 50f).toInt() * 50
-                    )
+                    onChunkHeightChange((it / 50f).toInt() * 50)
                 }
             )
 
@@ -438,10 +396,9 @@ private fun SettingsPanel(
                 label = "Base width",
                 value = config.baseWidth.toFloat(),
                 valueText = "%.1f".format(config.baseWidth),
-                valueRange = 30f..300f,
+                valueRange = 30f..1000f,
                 onValueChange = {
                     val newWidth = it.toDouble()
-
                     onConfigChange(
                         config.copy(
                             baseWidth = newWidth,
@@ -466,45 +423,30 @@ private fun SettingsPanel(
             DividerLine()
 
             Text(
-                text = "Centerline",
+                text = "Left Wall",
                 style = MaterialTheme.typography.titleMedium
             )
 
             SignalSettings(
-                signal = config.centerline,
+                signal = config.leftWall,
                 frequencyRange = 0.0001f..0.02f,
                 onChange = {
-                    onConfigChange(config.copy(centerline = it))
+                    onConfigChange(config.copy(leftWall = it))
                 }
             )
 
             DividerLine()
 
             Text(
-                text = "Width",
+                text = "Right Wall",
                 style = MaterialTheme.typography.titleMedium
             )
 
             SignalSettings(
-                signal = config.width,
+                signal = config.rightWall,
                 frequencyRange = 0.0001f..0.02f,
                 onChange = {
-                    onConfigChange(config.copy(width = it))
-                }
-            )
-
-            DividerLine()
-
-            Text(
-                text = "Asymmetry",
-                style = MaterialTheme.typography.titleMedium
-            )
-
-            SignalSettings(
-                signal = config.asymmetry,
-                frequencyRange = 0.0001f..0.02f,
-                onChange = {
-                    onConfigChange(config.copy(asymmetry = it))
+                    onConfigChange(config.copy(rightWall = it))
                 }
             )
         }
@@ -527,7 +469,7 @@ private fun SignalSettings(
             label = "Amplitude",
             value = signal.amplitude.toFloat(),
             valueText = "%.1f".format(signal.amplitude),
-            valueRange = 0f..100f,
+            valueRange = 0f..500f,
             onValueChange = {
                 onChange(signal.copy(amplitude = it.toDouble()))
             }
@@ -635,9 +577,6 @@ private fun DividerLine() {
 
 /**
  * Renders one chunk without adding any spacing or padding.
- *
- * The chunk identifier is drawn as an overlay and does not affect the
- * geometry viewport or the connection between adjacent chunks.
  */
 @Composable
 private fun ChunkPreview(
@@ -738,7 +677,7 @@ private fun ChunkPreview(
             shape = RoundedCornerShape(4.dp)
         ) {
             Text(
-                text = "CHUNK ${index + 1}  ·  $startDepth - $endDepth m",
+                text = "CHUNK ${index + 1} · $startDepth-$endDepth m",
                 modifier = Modifier.padding(
                     horizontal = 7.dp,
                     vertical = 3.dp
