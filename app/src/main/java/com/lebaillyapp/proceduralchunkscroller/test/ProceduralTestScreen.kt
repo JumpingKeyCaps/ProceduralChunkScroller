@@ -678,6 +678,9 @@ private fun SettingsPanel(
 
         Text("SIGNALS", fontWeight = FontWeight.Bold)
 
+
+        /**
+
         SignalSettings(
             title = "Centerline",
             signal = config.centerline,
@@ -701,6 +704,9 @@ private fun SettingsPanel(
                 onConfigChange(config.copy(asymmetry = it))
             }
         )
+
+
+        **/
 
         HorizontalDivider()
 
