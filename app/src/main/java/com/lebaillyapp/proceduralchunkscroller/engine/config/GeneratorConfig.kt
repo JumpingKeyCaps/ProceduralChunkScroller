@@ -1,19 +1,15 @@
-
 package com.lebaillyapp.proceduralchunkscroller.engine.config
 
 /**
  * # Defines the parameters used by the procedural geometry generator.
  *
- * Provides an explicit configuration for the three independent spatial signals:
- * - Centerline displacement.
- * - Global width variation.
- * - Left/right wall asymmetry.
+ * Provides an explicit configuration for the independent spatial signals
+ * driving the left and right walls.
  *
- * Each signal has its own fBm parameters, allowing independent control over
+ * Each wall has its own fBm parameters, allowing independent control over
  * its amplitude, spatial frequency and fractal characteristics.
  *
  * The configuration is immutable and contains no generation state.
- *
  * All spatial values use the same abstract coordinate unit.
  */
 data class GeneratorConfig(
@@ -25,26 +21,23 @@ data class GeneratorConfig(
 
     /**
      * Reference width of the generated passage.
-     *
-     * This is the width around which the width signal produces variations.
+     * Used to establish the baseline separation between walls.
      */
     val baseWidth: Double = 100.0,
 
     /**
      * Minimum permitted width of the generated passage.
-     *
      * The geometry generator must enforce this constraint when calculating
      * the final distance between the two walls.
      */
     val minWidth: Double = 30.0,
 
     /**
-     * ### Centerline displacement signal.
-     *
-     * Controls the horizontal displacement of the passage's central axis.
+     * ### Left wall spatial signal.
+     * Controls the lateral variations of the left boundary.
      */
-    val centerline: SignalConfig = SignalConfig(
-        amplitude = 20.0,
+    val leftWall: SignalConfig = SignalConfig(
+        amplitude = 25.0,
         frequency = 0.01,
         octaves = 3,
         persistence = 0.5,
@@ -52,26 +45,12 @@ data class GeneratorConfig(
     ),
 
     /**
-     * ### Global width variation signal.
-     *
-     * Controls how the passage expands and narrows around its reference width.
+     * ### Right wall spatial signal.
+     * Controls the lateral variations of the right boundary.
      */
-    val width: SignalConfig = SignalConfig(
-        amplitude = 15.0,
-        frequency = 0.005,
-        octaves = 3,
-        persistence = 0.5,
-        lacunarity = 2.0
-    ),
-
-    /**
-     * ### Left/right wall asymmetry signal.
-     *
-     * Controls the independent lateral deformation of each wall.
-     */
-    val asymmetry: SignalConfig = SignalConfig(
-        amplitude = 8.0,
-        frequency = 0.015,
+    val rightWall: SignalConfig = SignalConfig(
+        amplitude = 25.0,
+        frequency = 0.01,
         octaves = 3,
         persistence = 0.5,
         lacunarity = 2.0
@@ -95,13 +74,6 @@ data class GeneratorConfig(
 
     /**
      * # Defines the parameters of an individual spatial signal.
-     *
-     * The amplitude controls the magnitude of the signal.
-     *
-     * The frequency and fBm parameters control its spatial variation.
-     *
-     * This configuration can be independently assigned to any of the
-     * generator's spatial signals.
      */
     data class SignalConfig(
 
