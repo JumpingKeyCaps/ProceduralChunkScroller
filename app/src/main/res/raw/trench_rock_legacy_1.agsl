@@ -1,0 +1,125 @@
+uniform float2 iResolution;
+uniform float4 iWallColor;
+uniform float4 iVoidColor;
+uniform float iEdgePoints[10]; // 5 points (x, y) directeurs de Kotlin
+
+// Hachage 2D -> 2D
+float2 hash2(float2 p) {
+    p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
+    return fract(sin(p) * 43758.5453123);
+}
+
+// Interpolation linéaire de la courbe guide envoyée par Kotlin
+float getGuideEdgeX(float y) {
+    if (y <= iEdgePoints[3]) {
+        float t = clamp((y - iEdgePoints[1]) / (iEdgePoints[3] - iEdgePoints[1]), 0.0, 1.0);
+        return mix(iEdgePoints[0], iEdgePoints[2], t);
+    } else if (y <= iEdgePoints[5]) {
+        float t = clamp((y - iEdgePoints[3]) / (iEdgePoints[5] - iEdgePoints[3]), 0.0, 1.0);
+        return mix(iEdgePoints[2], iEdgePoints[4], t);
+    } else if (y <= iEdgePoints[7]) {
+        float t = clamp((y - iEdgePoints[5]) / (iEdgePoints[7] - iEdgePoints[5]), 0.0, 1.0);
+        return mix(iEdgePoints[4], iEdgePoints[6], t);
+    } else {
+        float t = clamp((y - iEdgePoints[7]) / (iEdgePoints[9] - iEdgePoints[7]), 0.0, 1.0);
+        return mix(iEdgePoints[6], iEdgePoints[8], t);
+    }
+}
+
+// Voronoi optimisé pour renvoyer la distance aux arêtes (relief de fracture)
+float voronoiHeight(float2 x) {
+    float2 n = floor(x);
+    float2 f = fract(x);
+
+    float md = 8.0;
+    float2 mr = float2(0.0);
+    float2 mg = float2(0.0);
+
+    for (int j=-1; j<=1; j++) {
+        for (int i=-1; i<=1; i++) {
+            float2 g = float2(float(i), float(j));
+            float2 o = hash2(n + g);
+            o = 0.5 + 0.5 * sin(6.2831 * o);
+            float2 r = g + o - f;
+            float d = dot(r, r);
+
+            if (d < md) {
+                md = d;
+                mr = r;
+                mg = g;
+            }
+        }
+    }
+
+    // Second passage pour affiner la distance aux frontières (creux des failles)
+    md = 8.0;
+    for (int j=-2; j<=2; j++) {
+        for (int i=-2; i<=2; i++) {
+            float2 g = mg + float2(float(i), float(j));
+            float2 o = hash2(n + g);
+            o = 0.5 + 0.5 * sin(6.2831 * o);
+            float2 r = g + o - f;
+
+            if (dot(mr-r, mr-r) > 0.00001) {
+                md = min(md, dot(0.5*(mr+r), normalize(r-mr)));
+            }
+        }
+    }
+    return md;
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord / iResolution;
+    float aspect = iResolution.x / iResolution.y;
+
+    // 1. Récupération de la position du guide de la faille à cette hauteur
+    float guideX = getGuideEdgeX(uv.y);
+
+    // 2. Ancrage de l'espace texturé par rapport à ce guide (évite le clipping brutal de l'écran)
+    float distFromGuide = uv.x - guideX;
+    float2 rockSpace = float2(distFromGuide * aspect, uv.y);
+
+    // --- ACCUMULATION DE HAUTEURS (HEIGHTFIELD BLENDING) ---
+    float hMacro = voronoiHeight(rockSpace * float2(3.0, 7.0));
+    float hMeso  = voronoiHeight(rockSpace * float2(8.0, 18.0));
+    float hMicro = voronoiHeight(rockSpace * float2(22.0, 48.0));
+
+    float combinedHeight = hMacro * 0.55 + hMeso * 0.30 + hMicro * 0.15;
+    float rockShape = smoothstep(0.02, 0.25, combinedHeight);
+
+    // 3. SCULPTURE ORGANIQUE DU BORD
+    // Le relief des blocs fait saillie ou rentre par rapport à la ligne guide
+    float organicDisplacement = (rockShape - 0.5) * 0.08;
+    float trueSurfaceDist = distFromGuide - organicDisplacement;
+
+    // Si on dépasse vers la droite, c'est le vide abyssal de la fosse
+    if (trueSurfaceDist > 0.0) {
+        return half4(iVoidColor);
+    }
+
+    // --- STYLE GRAVURE & HACHURES (de ta version validée) ---
+    float angle = hMacro * 3.1415;
+    float2 hDir = float2(cos(angle), sin(angle));
+
+    float hatchPattern = sin(dot(uv * 400.0, hDir));
+    float hatchLine = step(0.2, hatchPattern);
+
+    float shading = mix(0.1, 0.95, rockShape);
+
+    if (shading < 0.55) {
+        shading = mix(0.05, shading, hatchLine);
+    } else {
+        float grain = step(0.0, sin(dot(uv * 600.0, float2(1.0, 1.0))));
+        shading = mix(shading * 0.85, shading, grain);
+    }
+
+    // Assombrissement progressif vers les bords / profondeur
+    float depthShadow = smoothstep(0.0, 0.45, abs(trueSurfaceDist));
+    shading *= mix(0.2, 1.0, depthShadow);
+
+    // Légère surbrillance sur l'arête de fuite de la roche
+    float rim = smoothstep(0.015, 0.0, abs(trueSurfaceDist)) * rockShape;
+    shading = clamp(shading + rim * 0.4, 0.0, 1.0);
+
+    return half4(iWallColor.rgb * shading, iWallColor.a);
+}
