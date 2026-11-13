@@ -17,7 +17,10 @@ fun rememberTrenchRockBrush(
     edgePoints: FloatArray,
     hatchDensity: Float,
     displacementStrength: Float,
-    scaleMultiplier: Float
+    scaleMultiplier: Float,
+    angularity: Float,
+    strataStretch: Float,
+    tectonicWarp: Float
 ): ShaderBrush? {
     if (size.width <= 0f || size.height <= 0f) return null
 
@@ -38,6 +41,9 @@ fun rememberTrenchRockBrush(
         hatchDensity,
         displacementStrength,
         scaleMultiplier,
+        angularity,
+        strataStretch,
+        tectonicWarp,
         shader
     ) {
         shader.setFloatUniform("iResolution", size.width, size.height)
@@ -47,6 +53,9 @@ fun rememberTrenchRockBrush(
         shader.setFloatUniform("iHatchDensity", hatchDensity)
         shader.setFloatUniform("iDisplacementStrength", displacementStrength)
         shader.setFloatUniform("iScaleMultiplier", scaleMultiplier)
+        shader.setFloatUniform("iAngularity", angularity)
+        shader.setFloatUniform("iStrataStretch", strataStretch)
+        shader.setFloatUniform("iTectonicWarp", tectonicWarp)
         ShaderBrush(shader)
     }
 }
