@@ -1,0 +1,136 @@
+uniform float2 iResolution;
+uniform float4 iWallColor;
+uniform float4 iVoidColor;
+uniform float iEdgePoints[10]; // 5 points directeurs Kotlin
+uniform float iHatchDensity;         // Piloté par seekbar (ex: 50 à 600)
+uniform float iDisplacementStrength; // Piloté par seekbar (ex: 0.0 à 0.25)
+uniform float iScaleMultiplier;      // Piloté par seekbar (ex: 0.2 à 3.0)
+
+// Hachage 2D -> 2D
+float2 hash2(float2 p) {
+    p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
+    return fract(sin(p) * 43758.5453123);
+}
+
+// Interpolation linéaire de la courbe guide envoyée par Kotlin
+float getGuideEdgeX(float y) {
+    if (y <= iEdgePoints[3]) {
+        float t = clamp((y - iEdgePoints[1]) / (iEdgePoints[3] - iEdgePoints[1]), 0.0, 1.0);
+        return mix(iEdgePoints[0], iEdgePoints[2], t);
+    } else if (y <= iEdgePoints[5]) {
+        float t = clamp((y - iEdgePoints[3]) / (iEdgePoints[5] - iEdgePoints[3]), 0.0, 1.0);
+        return mix(iEdgePoints[2], iEdgePoints[4], t);
+    } else if (y <= iEdgePoints[7]) {
+        float t = clamp((y - iEdgePoints[5]) / (iEdgePoints[7] - iEdgePoints[5]), 0.0, 1.0);
+        return mix(iEdgePoints[4], iEdgePoints[6], t);
+    } else {
+        float t = clamp((y - iEdgePoints[7]) / (iEdgePoints[9] - iEdgePoints[7]), 0.0, 1.0);
+        return mix(iEdgePoints[6], iEdgePoints[8], t);
+    }
+}
+
+// Voronoi optimisé pour renvoyer la distance aux arêtes (relief de fracture)
+float voronoiHeight(float2 x) {
+    float2 n = floor(x);
+    float2 f = fract(x);
+
+    float md = 8.0;
+    float2 mr = float2(0.0);
+    float2 mg = float2(0.0);
+
+    for (int j=-1; j<=1; j++) {
+        for (int i=-1; i<=1; i++) {
+            float2 g = float2(float(i), float(j));
+            float2 o = hash2(n + g);
+            o = 0.5 + 0.5 * sin(6.2831 * o);
+
+            float2 r = g + o - f;
+            float d = dot(r, r);
+
+            if (d < md) {
+                md = d;
+                mr = r;
+                mg = g;
+            }
+        }
+    }
+
+    // Second passage pour affiner la distance aux frontières (creux des failles)
+    md = 8.0;
+    for (int j=-2; j<=2; j++) {
+        for (int i=-2; i<=2; i++) {
+            float2 g = mg + float2(float(i), float(j));
+            float2 o = hash2(n + g);
+            o = 0.5 + 0.5 * sin(6.2831 * o);
+
+            float2 r = g + o - f;
+
+            if (dot(mr-r, mr-r) > 0.00001) {
+                md = min(md, dot(0.5*(mr+r), normalize(r-mr)));
+            }
+        }
+    }
+    return md;
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord / iResolution;
+    float aspect = iResolution.x / iResolution.y;
+
+    // 1. Récupération de la position du guide de la faille à cette hauteur
+    float guideX = getGuideEdgeX(uv.y);
+
+    // 2. Ancrage de l'espace texturé par rapport à ce guide et application de l'échelle dynamique
+    float distFromGuide = uv.x - guideX;
+    float2 rockSpace = float2(distFromGuide * aspect, uv.y) * iScaleMultiplier;
+
+    // --- ACCUMULATION DE HAUTEURS (RELIEF 3D DES BLOCS) ---
+    float hMacro = voronoiHeight(rockSpace * float2(3.0, 7.0));
+    float hMeso  = voronoiHeight(rockSpace * float2(8.0, 18.0));
+    float hMicro = voronoiHeight(rockSpace * float2(22.0, 48.0));
+
+    float combinedHeight = hMacro * 0.55 + hMeso * 0.30 + hMicro * 0.15;
+    float rockShape = smoothstep(0.02, 0.25, combinedHeight);
+
+    // 3. SCULPTURE ORGANIQUE DU BORD (pilotée par l'amplitude dynamique)
+    float organicDisplacement = (rockShape - 0.5) * iDisplacementStrength;
+    float trueSurfaceDist = distFromGuide - organicDisplacement;
+
+    if (trueSurfaceDist > 0.0) {
+        return half4(iVoidColor);
+    }
+
+    // --- STYLE GRAVURE : MIX HACHURES & CROSS-HATCHING (densité dynamique) ---
+    float2 hDir = normalize(float2(1.0, 1.0));
+    float2 hDirCross = normalize(float2(-1.0, 1.0));
+
+    // Traits francs utilisant iHatchDensity
+    float hatch1 = step(0.6, fract(dot(rockSpace * iHatchDensity, hDir)));
+    float hatch2 = step(0.6, fract(dot(rockSpace * iHatchDensity, hDirCross)));
+    float hatchLight = step(0.75, fract(dot(rockSpace * (iHatchDensity * 0.615), hDir)));
+
+    float shading = mix(0.1, 1.0, rockShape);
+
+    // Répartition graduelle des hachures
+    if (rockShape < 0.35) {
+        float cross = hatch1 * hatch2;
+        shading *= mix(0.05, 0.3, cross);
+    } else if (rockShape < 0.65) {
+        float mixedHatch = mix(hatch1, hatch1 * hatch2, 0.4);
+        shading *= mix(0.25, 0.65, mixedHatch);
+    } else if (rockShape < 0.85) {
+        shading *= mix(0.4, 0.8, hatch1);
+    } else {
+        shading *= mix(0.75, 0.95, hatchLight);
+    }
+
+    // Assombrissement progressif vers les bords / profondeur de la faille
+    float depthShadow = smoothstep(0.0, 0.45, abs(trueSurfaceDist));
+    shading *= mix(0.15, 1.0, depthShadow);
+
+    // Ombre de contact au niveau de la découpe
+    float edgeShadow = smoothstep(0.0, 0.02, abs(trueSurfaceDist));
+    shading *= mix(0.3, 1.0, edgeShadow);
+
+    return half4(iWallColor.rgb * shading, 1.0);
+}
