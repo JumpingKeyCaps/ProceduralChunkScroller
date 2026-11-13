@@ -1,10 +1,13 @@
 uniform float2 iResolution;
 uniform float4 iWallColor;
 uniform float4 iVoidColor;
-uniform float iEdgePoints[10]; // 5 points directeurs Kotlin
-uniform float iHatchDensity;         // Piloté par seekbar (ex: 50 à 600)
-uniform float iDisplacementStrength; // Piloté par seekbar (ex: 0.0 à 0.25)
-uniform float iScaleMultiplier;      // Piloté par seekbar (ex: 0.2 à 3.0)
+uniform float iEdgePoints[10];
+uniform float iHatchDensity;
+uniform float iDisplacementStrength;
+uniform float iScaleMultiplier;
+uniform float iAngularity;    // 0.0 (Euclidien rond) -> 1.0 (Manhattan/Chebyshev anguleux)
+uniform float iStrataStretch; // Étirement anisotrope X/Y
+uniform float iTectonicWarp;  // Intensité de la torsion spatiale
 
 // Hachage 2D -> 2D
 float2 hash2(float2 p) {
@@ -12,7 +15,7 @@ float2 hash2(float2 p) {
     return fract(sin(p) * 43758.5453123);
 }
 
-// Interpolation linéaire de la courbe guide envoyée par Kotlin
+// Interpolation linéaire de la courbe guide
 float getGuideEdgeX(float y) {
     if (y <= iEdgePoints[3]) {
         float t = clamp((y - iEdgePoints[1]) / (iEdgePoints[3] - iEdgePoints[1]), 0.0, 1.0);
@@ -29,8 +32,18 @@ float getGuideEdgeX(float y) {
     }
 }
 
-// Voronoi optimisé pour renvoyer la distance aux arêtes (relief de fracture)
-float voronoiHeight(float2 x) {
+// Distance hybride : permet de passer de blocs arrondis à des blocs géométriques/cristallins
+float customMetric(float2 r, float angularity) {
+    float euclid = dot(r, r);
+    // Combinaison Manhattan + Chebyshev pour des arêtes vives et facettées
+    float manhattan = abs(r.x) + abs(r.y);
+    float chebyshev = max(abs(r.x), abs(r.y));
+    float sharp = mix(manhattan * 0.7, chebyshev, 0.5);
+    return mix(euclid, sharp * sharp, angularity);
+}
+
+// Voronoi avec métrique morphologique variable
+float voronoiHeight(float2 x, float angularity) {
     float2 n = floor(x);
     float2 f = fract(x);
 
@@ -45,7 +58,7 @@ float voronoiHeight(float2 x) {
             o = 0.5 + 0.5 * sin(6.2831 * o);
 
             float2 r = g + o - f;
-            float d = dot(r, r);
+            float d = customMetric(r, angularity);
 
             if (d < md) {
                 md = d;
@@ -55,7 +68,7 @@ float voronoiHeight(float2 x) {
         }
     }
 
-    // Second passage pour affiner la distance aux frontières (creux des failles)
+    // Second passage pour les arêtes de fracture
     md = 8.0;
     for (int j=-2; j<=2; j++) {
         for (int i=-2; i<=2; i++) {
@@ -66,7 +79,12 @@ float voronoiHeight(float2 x) {
             float2 r = g + o - f;
 
             if (dot(mr-r, mr-r) > 0.00001) {
-                md = min(md, dot(0.5*(mr+r), normalize(r-mr)));
+                // On module aussi le calcul de frontière selon l'angularité
+                float edgeEuclid = dot(0.5*(mr+r), normalize(r-mr));
+                float2 diff = abs(r - mr);
+                float edgeSharp = max(diff.x, diff.y) * 0.5;
+                float edgeDist = mix(edgeEuclid, edgeSharp, angularity * 0.65);
+                md = min(md, edgeDist);
             }
         }
     }
@@ -77,22 +95,34 @@ half4 main(float2 fragCoord) {
     float2 uv = fragCoord / iResolution;
     float aspect = iResolution.x / iResolution.y;
 
-    // 1. Récupération de la position du guide de la faille à cette hauteur
     float guideX = getGuideEdgeX(uv.y);
-
-    // 2. Ancrage de l'espace texturé par rapport à ce guide et application de l'échelle dynamique
     float distFromGuide = uv.x - guideX;
-    float2 rockSpace = float2(distFromGuide * aspect, uv.y) * iScaleMultiplier;
 
-    // --- ACCUMULATION DE HAUTEURS (RELIEF 3D DES BLOCS) ---
-    float hMacro = voronoiHeight(rockSpace * float2(3.0, 7.0));
-    float hMeso  = voronoiHeight(rockSpace * float2(8.0, 18.0));
-    float hMicro = voronoiHeight(rockSpace * float2(22.0, 48.0));
+    // Espace de base (non déformé pour que les hachures restent propres et rectilignes)
+    float2 baseSpace = float2(distFromGuide * aspect, uv.y) * iScaleMultiplier;
+
+    // --- DÉFORMATION MORPHOLOGIQUE DE L'ESPACE DES BLOCS ---
+    // 1. Étirement des strates (anisotropie)
+    float2 rockSpace = float2(baseSpace.x / iStrataStretch, baseSpace.y * iStrataStretch);
+
+    // 2. Domain Warping (torsion tectonique progressive)
+    if (iTectonicWarp > 0.001) {
+        float2 warpOffset = float2(
+            sin(rockSpace.y * 5.0 + rockSpace.x * 2.0),
+            cos(rockSpace.x * 4.5 - rockSpace.y * 2.5)
+        ) * 0.18 * iTectonicWarp;
+        rockSpace += warpOffset;
+    }
+
+    // --- ACCUMULATION DE HAUTEURS ---
+    float hMacro = voronoiHeight(rockSpace * float2(3.0, 7.0), iAngularity);
+    float hMeso  = voronoiHeight(rockSpace * float2(8.0, 18.0), iAngularity);
+    float hMicro = voronoiHeight(rockSpace * float2(22.0, 48.0), iAngularity * 0.5);
 
     float combinedHeight = hMacro * 0.55 + hMeso * 0.30 + hMicro * 0.15;
     float rockShape = smoothstep(0.02, 0.25, combinedHeight);
 
-    // 3. SCULPTURE ORGANIQUE DU BORD (pilotée par l'amplitude dynamique)
+    // Sculpture du bord
     float organicDisplacement = (rockShape - 0.5) * iDisplacementStrength;
     float trueSurfaceDist = distFromGuide - organicDisplacement;
 
@@ -100,18 +130,17 @@ half4 main(float2 fragCoord) {
         return half4(iVoidColor);
     }
 
-    // --- STYLE GRAVURE : MIX HACHURES & CROSS-HATCHING (densité dynamique) ---
+    // --- STYLE GRAVURE : HACHURES NON DÉFORMÉES ---
+    // On utilise baseSpace pour garder des traits de burin bien droits et réguliers
     float2 hDir = normalize(float2(1.0, 1.0));
     float2 hDirCross = normalize(float2(-1.0, 1.0));
 
-    // Traits francs utilisant iHatchDensity
-    float hatch1 = step(0.6, fract(dot(rockSpace * iHatchDensity, hDir)));
-    float hatch2 = step(0.6, fract(dot(rockSpace * iHatchDensity, hDirCross)));
-    float hatchLight = step(0.75, fract(dot(rockSpace * (iHatchDensity * 0.615), hDir)));
+    float hatch1 = step(0.6, fract(dot(baseSpace * iHatchDensity, hDir)));
+    float hatch2 = step(0.6, fract(dot(baseSpace * iHatchDensity, hDirCross)));
+    float hatchLight = step(0.75, fract(dot(baseSpace * (iHatchDensity * 0.615), hDir)));
 
     float shading = mix(0.1, 1.0, rockShape);
 
-    // Répartition graduelle des hachures
     if (rockShape < 0.35) {
         float cross = hatch1 * hatch2;
         shading *= mix(0.05, 0.3, cross);
@@ -124,11 +153,9 @@ half4 main(float2 fragCoord) {
         shading *= mix(0.75, 0.95, hatchLight);
     }
 
-    // Assombrissement progressif vers les bords / profondeur de la faille
     float depthShadow = smoothstep(0.0, 0.45, abs(trueSurfaceDist));
     shading *= mix(0.15, 1.0, depthShadow);
 
-    // Ombre de contact au niveau de la découpe
     float edgeShadow = smoothstep(0.0, 0.02, abs(trueSurfaceDist));
     shading *= mix(0.3, 1.0, edgeShadow);
 
